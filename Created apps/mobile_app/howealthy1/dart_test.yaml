@@ -1,0 +1,3 @@
+tags:
+  tflite:
+    skip: "tflite_flutter v0.10.4 has a Dart SDK incompatibility (UnmodifiableUint8ListView). Tagged tests require tflite_flutter upgrade to run."

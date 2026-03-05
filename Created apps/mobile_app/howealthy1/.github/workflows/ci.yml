@@ -1,0 +1,156 @@
+# HoWealthy CI/CD Pipeline
+# Triggered on every push and PR to any branch.
+# Jobs: Analyze → Test (with 80% coverage gate) → Security Scan → Build APK
+#
+# BRANCH PROTECTION: Enable on main + develop in GitHub repo settings.
+
+name: Howealthy CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # JOB 1: Static Analysis — Zero lint errors on every push
+  # ─────────────────────────────────────────────────────────────
+  analyze:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.x"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed lib/ test/
+
+      - name: Run static analysis (fatal warnings)
+        run: flutter analyze --fatal-warnings
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2: Tests — >80% coverage required
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Unit & Widget Tests
+    runs-on: ubuntu-latest
+    needs: analyze
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.x"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run tests with coverage
+        run: flutter test --coverage --reporter=github
+
+      - name: Install lcov
+        run: sudo apt-get install -y lcov
+
+      - name: Enforce 80% coverage threshold
+        run: |
+          COVERAGE=$(lcov --summary coverage/lcov.info 2>&1 | grep "lines" | awk '{print $4}' | tr -d '%')
+          echo "Coverage: ${COVERAGE:-0}%"
+          if [ -z "$COVERAGE" ] || (( $(echo "${COVERAGE:-0} < 80" | bc -l) )); then
+            echo "❌ Coverage ${COVERAGE:-0}% is below the 80% minimum."
+            exit 1
+          fi
+          echo "✅ Coverage ${COVERAGE}% passes threshold."
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage/lcov.info
+          fail_ci_if_error: false
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 3: Security — Validate no secrets committed to source
+  # ─────────────────────────────────────────────────────────────
+  security:
+    name: Secret & Dependency Scan
+    runs-on: ubuntu-latest
+    needs: analyze
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.x"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check for JSON key files in source
+        run: |
+          if find lib/ test/ -name "*.json" | grep -q .; then
+            echo "❌ JSON files found in lib/ or test/ — possible secret exposure!"
+            find lib/ test/ -name "*.json"
+            exit 1
+          fi
+          echo "✅ No JSON secret files in source."
+
+      - name: Verify firebase-key.json is gitignored
+        run: |
+          if git ls-files --error-unmatch firebase-key.json 2>/dev/null; then
+            echo "❌ firebase-key.json is tracked by git — revoke and remove immediately!"
+            exit 1
+          fi
+          echo "✅ firebase-key.json is not tracked."
+
+      - name: List outdated packages (advisory only)
+        run: flutter pub outdated --no-dev-dependencies || true
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 4: Build — Debug APK must compile on every PR
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.27.x"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug --no-pub
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: howealthy-debug-${{ github.sha }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
