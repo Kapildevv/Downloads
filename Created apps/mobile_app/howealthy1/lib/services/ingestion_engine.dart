@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'dart:isolate';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../constants/categories.dart';
@@ -64,8 +66,6 @@ class IngestionEngine {
         final rawAmount = (match.group(1) ?? '').replaceAll(',', '');
         double amount = double.tryParse(rawAmount) ?? 0;
         if (amount <= 0) continue;
-        int timeBucket =
-            (msgDate.millisecondsSinceEpoch / (1000 * 60 * 5)).floor();
 
         String type = (body.contains('credited') || body.contains('received'))
             ? "Credit"
@@ -74,14 +74,18 @@ class IngestionEngine {
         // TD-9: Expanded category detection to 6 categories (mirrors MlClassifierService)
         String category = _classifyCategory(body, type);
 
+        final rawFingerprint =
+            "${sender}_${amount}_${msgDate.millisecondsSinceEpoch}";
+        final signature =
+            sha256.convert(utf8.encode(rawFingerprint)).toString();
+
         processedData.add({
           'amount': amount,
           'category': category,
           'type': type,
           'body': _redactSmsBody(rawBody), // PII redacted — DPDP Act compliance
           'date': msgDate.toString(),
-          'fingerprint':
-              "${amount}_$timeBucket", // Unbreakable Deduplication Hash
+          'fingerprint': signature, // Strong SHA-256 Deduplication Hash
         });
       }
     }

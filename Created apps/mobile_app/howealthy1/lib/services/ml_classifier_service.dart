@@ -9,11 +9,11 @@ class MlClassifierService {
   /// Call this once during the Cinematic Loader phase
   static Future<void> initializeModel() async {
     try {
-      // Expects a pre-trained model in your assets folder
-      _interpreter = await Interpreter.fromAsset(
-          'assets/models/expense_classifier.tflite');
-      _isModelLoaded = true;
-      debugPrint("TFLite Engine Initialized.");
+      // D3 Fix: TFLite model tokenizer is currently a stub and model is not ready.
+      // Temporarily disabling TFLite to rely entirely on the robust Category Regex Matrix
+      // until a proper vocabulary file and tokenization pipeline are implemented.
+      _isModelLoaded = false;
+      debugPrint("TFLite Model not ready. Forcing Regex matrix fallback.");
     } catch (e) {
       debugPrint(
           "TFLite Initialization Failed. Defaulting to Regex Matrix: $e");
