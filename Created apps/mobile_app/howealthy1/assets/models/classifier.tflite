@@ -1,0 +1,3 @@
+PLACEHOLDER TFLITE MODEL
+This file is a placeholder to ensure the app compiles without crashing on missing assets.
+The actual transaction categorization TFLite model should be placed here before production deployment.
